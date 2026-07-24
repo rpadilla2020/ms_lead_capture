@@ -5,34 +5,34 @@ import {
 } from '@nestjs/platform-fastify';
 import { ValidationPipe } from '@nestjs/common';
 import { AppModule }      from './app.module';
+import * as fs from 'fs';
 
 async function bootstrap() {
+  // Mismo patrón que ms_notifications/ncc4-ami: HTTPS_KEY=foo.bar → certs en
+  // /etc/httpd/cert/foo.bar.com.{key,crt} + ca.crt. Sin HTTPS_KEY, HTTP plano
+  // (dev local).
+  const httpsOptions = process.env.HTTPS_KEY
+    ? {
+        key:  fs.readFileSync(`/etc/httpd/cert/${process.env.HTTPS_KEY}.com.key`),
+        cert: fs.readFileSync(`/etc/httpd/cert/${process.env.HTTPS_KEY}.com.crt`),
+        ca:   fs.readFileSync('/etc/httpd/cert/ca.crt'),
+      }
+    : undefined;
+
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
-    // FIX #6 — rawBody: true expone req.rawBody para la verificación HMAC del webhook
-    // Sin esto, req.rawBody es undefined y la firma siempre falla silenciosamente
     new FastifyAdapter({
       logger:    false,
       bodyLimit: 1_048_576,
-      // Fastify necesita addContentTypeParser para exponer rawBody
+      https:     httpsOptions,
     }),
+    // rawBody: true expone req.rawBody nativamente (Nest lo llena sin pisar
+    // el content-type parser JSON por defecto de Fastify) — necesario para
+    // la verificación HMAC del webhook de Meta.
+    { rawBody: true },
   );
 
-  // FIX #6 — registrar content-type parser que preserve el rawBody
   const fastifyInstance = app.getHttpAdapter().getInstance();
-  fastifyInstance.addContentTypeParser(
-    'application/json',
-    { parseAs: 'buffer' },
-    (req: any, body: Buffer, done: (err: Error | null, payload?: any) => void) => {
-      try {
-        req.rawBody = body;
-        const json  = JSON.parse(body.toString('utf8'));
-        done(null, json);
-      } catch (err) {
-        done(err);
-      }
-    },
-  );
 
   app.setGlobalPrefix('api/lead-capture');
 
