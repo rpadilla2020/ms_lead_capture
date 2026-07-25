@@ -10,6 +10,20 @@ import { MetaWebhookLog, WebhookLogStatus } from '../../entities/meta-webhook-lo
 import { GraphApiService } from '../graph-api/graph-api.service';
 import { UsersClientService } from '../users-client/users-client.service';
 
+/** Targets válidos de field_mapping — cualquier otro se ignora con warning */
+const STRING_TARGETS = ['title', 'email', 'phone', 'currency', 'expected_close_date'] as const;
+const NUMBER_TARGETS = ['value', 'probability'] as const;
+
+interface MappedFields {
+  title?: string;
+  email?: string;
+  phone?: string;
+  currency?: string;
+  expected_close_date?: string;
+  value?: number;
+  probability?: number;
+}
+
 /** Máximo de leads procesados en paralelo por batch de webhook */
 const WEBHOOK_CONCURRENCY = Number(process.env.WEBHOOK_CONCURRENCY ?? 5);
 
@@ -227,14 +241,33 @@ export class LeadProcessorService {
     }
   }
 
+  /**
+   * field_mapping: { "<campo_de_meta>": "<target>" }. Targets soportados:
+   * title, email, phone (string), currency, expected_close_date (string),
+   * value, probability (number — se descarta si no es numérico). Cualquier
+   * otro target se ignora con warning — no rompe el procesamiento del lead.
+   */
   private applyMapping(
     fields: Record<string, string>,
     mapping: Record<string, string>,
-  ): Record<string, string> {
-    if (!Object.keys(mapping).length) return { ...fields };
-    const result: Record<string, string> = {};
-    for (const [metaKey, cereazKey] of Object.entries(mapping)) {
-      if (fields[metaKey] !== undefined) result[cereazKey] = fields[metaKey];
+  ): MappedFields {
+    const result: MappedFields = {};
+    for (const [metaKey, target] of Object.entries(mapping)) {
+      const raw = fields[metaKey];
+      if (raw === undefined || raw === '') continue;
+
+      if ((STRING_TARGETS as readonly string[]).includes(target)) {
+        (result as Record<string, string>)[target] = raw;
+      } else if ((NUMBER_TARGETS as readonly string[]).includes(target)) {
+        const num = Number(raw);
+        if (Number.isNaN(num)) {
+          this.logger.warn(`[LeadProcessor] field_mapping: "${raw}" no es numérico para target "${target}" (campo Meta "${metaKey}")`);
+        } else {
+          (result as Record<string, number>)[target] = num;
+        }
+      } else {
+        this.logger.warn(`[LeadProcessor] field_mapping: target desconocido "${target}" (campo Meta "${metaKey}")`);
+      }
     }
     return result;
   }
@@ -252,7 +285,7 @@ export class LeadProcessorService {
 
   private async createOpportunity(
     formConfig: MetaFormConfig,
-    mapped: Record<string, string>,
+    mapped: MappedFields,
     graphData: any,
     rawFields: Record<string, string>,
     client: { id: string; snapshot: Record<string, any> },
@@ -270,12 +303,16 @@ export class LeadProcessorService {
     // armado a mano — por eso pasa por UsersClientService antes.
     const payload = {
       title,
-      pipeline_id:      formConfig.target_pipeline_id,
-      stage_id:         formConfig.target_stage_id,
-      assigned_user_id: formConfig.default_agent_id ?? undefined,
-      source:           'meta_ads',
-      source_ref_id:    graphData.id,
-      created_by:       'system',
+      pipeline_id:         formConfig.target_pipeline_id,
+      stage_id:            formConfig.target_stage_id,
+      assigned_user_id:    formConfig.default_agent_id ?? undefined,
+      source:              'meta_ads',
+      source_ref_id:       graphData.id,
+      created_by:          'system',
+      value:                mapped.value               ?? undefined,
+      currency:             mapped.currency             ?? undefined,
+      probability:          mapped.probability          ?? undefined,
+      expected_close_date:  mapped.expected_close_date  ?? undefined,
       metadata: {
         page_id:       formConfig.page_id,  form_id:       formConfig.form_id,
         ad_id:         graphData.ad_id,     ad_name:       graphData.ad_name,
