@@ -43,6 +43,17 @@ export class MetaPagesController {
     return this.graphApi.getPageForms(page.page_id, page.page_token);
   }
 
+  /** Preguntas reales de un formulario — para armar el field_mapping sin adivinar keys */
+  @Get(':id/ad-forms/:formId/questions')
+  async getFormQuestions(
+    @Param('id') id: string,
+    @Param('formId') formId: string,
+    @Headers('x-account-id') accountId: string,
+  ) {
+    const page = await this.pagesService.findOneWithToken(id, Number(accountId));
+    return this.graphApi.getFormQuestions(formId, page.page_token);
+  }
+
   @Patch(':id/toggle')
   toggle(@Param('id') id: string, @Headers('x-account-id') accountId: string) {
     return this.pagesService.toggle(id, Number(accountId));

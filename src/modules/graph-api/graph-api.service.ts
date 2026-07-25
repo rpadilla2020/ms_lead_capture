@@ -9,6 +9,7 @@ export interface GraphLeadData {
   adset_id?: string; adset_name?: string; campaign_id?: string; campaign_name?: string;
 }
 export interface GraphAdForm { id: string; name: string; status: string; leads_count?: number; }
+export interface GraphFormQuestion { key: string; label: string; type: string; id: string; }
 export interface GraphAdAccount { id: string; name: string; account_status: number; }
 export interface GraphCampaign {
   id: string; name: string; status: string;
@@ -76,6 +77,27 @@ export class GraphApiService {
       `${this.base}/${pageId}/leadgen_forms`,
       { fields: 'id,name,status,leads_count', access_token: pageToken },
     );
+  }
+
+  /**
+   * Preguntas reales de un formulario — key es el nombre técnico que va a
+   * llegar en field_data[].name de cada lead, label es lo que ve el cliente.
+   * Verificado contra Graph API real, incluye preguntas custom (ej. "DNI").
+   */
+  async getFormQuestions(formId: string, pageToken: string): Promise<GraphFormQuestion[]> {
+    try {
+      const resp = await firstValueFrom(
+        this.http.get<{ questions: GraphFormQuestion[] }>(
+          `${this.base}/${formId}`,
+          { params: { fields: 'questions', access_token: pageToken }, timeout: GRAPH_TIMEOUT_MS },
+        ),
+      );
+      return resp.data?.questions ?? [];
+    } catch (err) {
+      const msg = err?.response?.data?.error?.message ?? err.message;
+      this.logger.error(`[GraphApi] getFormQuestions ${formId}: ${msg}`);
+      throw new HttpException(`Graph API error: ${msg}`, HttpStatus.BAD_GATEWAY);
+    }
   }
 
   // ─── Ad Accounts ─────────────────────────────────────────────────────

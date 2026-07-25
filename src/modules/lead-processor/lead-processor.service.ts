@@ -10,7 +10,8 @@ import { MetaWebhookLog, WebhookLogStatus } from '../../entities/meta-webhook-lo
 import { GraphApiService } from '../graph-api/graph-api.service';
 import { UsersClientService } from '../users-client/users-client.service';
 
-/** Targets válidos de field_mapping — cualquier otro se ignora con warning */
+/** Targets de primera clase de field_mapping — cualquier otro target no se
+ * pierde, se guarda igual en metadata.custom.<target> de la oportunidad. */
 const STRING_TARGETS = ['title', 'email', 'phone', 'currency', 'expected_close_date'] as const;
 const NUMBER_TARGETS = ['value', 'probability'] as const;
 
@@ -22,6 +23,7 @@ interface MappedFields {
   expected_close_date?: string;
   value?: number;
   probability?: number;
+  custom: Record<string, string>;
 }
 
 /** Máximo de leads procesados en paralelo por batch de webhook */
@@ -242,31 +244,35 @@ export class LeadProcessorService {
   }
 
   /**
-   * field_mapping: { "<campo_de_meta>": "<target>" }. Targets soportados:
-   * title, email, phone (string), currency, expected_close_date (string),
-   * value, probability (number — se descarta si no es numérico). Cualquier
-   * otro target se ignora con warning — no rompe el procesamiento del lead.
+   * field_mapping: { "<campo_de_meta>": "<target>" }. Targets de primera
+   * clase: title, email, phone, currency, expected_close_date (string),
+   * value, probability (number — se descarta con warning si el campo no es
+   * numérico). Cualquier otro target NO se pierde — queda disponible en
+   * metadata.custom.<target> de la oportunidad, así cada cliente puede
+   * mapear sus propios campos (ej. el formulario X tiene "DNI", el Y tiene
+   * "presupuesto_mensual") sin que tengamos que anticipar cada caso.
    */
   private applyMapping(
     fields: Record<string, string>,
     mapping: Record<string, string>,
   ): MappedFields {
-    const result: MappedFields = {};
+    const result: MappedFields = { custom: {} };
     for (const [metaKey, target] of Object.entries(mapping)) {
       const raw = fields[metaKey];
       if (raw === undefined || raw === '') continue;
 
       if ((STRING_TARGETS as readonly string[]).includes(target)) {
-        (result as Record<string, string>)[target] = raw;
+        (result as unknown as Record<string, string>)[target] = raw;
       } else if ((NUMBER_TARGETS as readonly string[]).includes(target)) {
         const num = Number(raw);
         if (Number.isNaN(num)) {
-          this.logger.warn(`[LeadProcessor] field_mapping: "${raw}" no es numérico para target "${target}" (campo Meta "${metaKey}")`);
+          this.logger.warn(`[LeadProcessor] field_mapping: "${raw}" no es numérico para target "${target}" (campo Meta "${metaKey}") — se guarda como texto en metadata.custom`);
+          result.custom[target] = raw;
         } else {
-          (result as Record<string, number>)[target] = num;
+          (result as unknown as Record<string, number>)[target] = num;
         }
       } else {
-        this.logger.warn(`[LeadProcessor] field_mapping: target desconocido "${target}" (campo Meta "${metaKey}")`);
+        result.custom[target] = raw;
       }
     }
     return result;
@@ -318,6 +324,10 @@ export class LeadProcessorService {
         ad_id:         graphData.ad_id,     ad_name:       graphData.ad_name,
         campaign_id:   graphData.campaign_id, campaign_name: graphData.campaign_name,
         adset_id:      graphData.adset_id,  adset_name:    graphData.adset_name,
+        // Targets de field_mapping que no son de primera clase — cada
+        // cliente puede mapear sus propios campos (ej. "DNI") sin que se
+        // pierdan aunque no tengamos un campo dedicado para ellos todavía.
+        ...(Object.keys(mapped.custom).length ? { custom: mapped.custom } : {}),
       },
       contact_id:       client.id,
       contact_snapshot: client.snapshot,
