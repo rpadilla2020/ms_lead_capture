@@ -20,7 +20,16 @@ export interface GraphAdSet {
 }
 export interface GraphAd {
   id: string; name: string; status: string;
-  creative?: { lead_gen_form?: { id: string; name: string } };
+  // creative.lead_gen_form NO existe en Graph API (confirmado — error #100
+  // "nonexisting field"). El form_id de un Lead Ad vive anidado en
+  // object_story_spec.link_data.call_to_action.value.lead_gen_form_id.
+  creative?: {
+    object_story_spec?: {
+      link_data?: {
+        call_to_action?: { type?: string; value?: { lead_gen_form_id?: string } };
+      };
+    };
+  };
 }
 export interface GraphTokenDebug {
   data: { is_valid: boolean; expires_at: number; scopes: string[] };
@@ -101,7 +110,7 @@ export class GraphApiService {
     return this.paginateAll<GraphCampaign>(
       `${this.base}/${adAccountId}/campaigns`,
       {
-        fields: 'id,name,status,adsets{id,name,status,ads{id,name,status,creative{lead_gen_form{id,name}}}}',
+        fields: 'id,name,status,adsets{id,name,status,ads{id,name,status,creative{object_story_spec}}}',
         access_token: accessToken,
       },
     );

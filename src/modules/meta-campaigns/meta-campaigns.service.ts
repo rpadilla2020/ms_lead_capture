@@ -76,7 +76,7 @@ export class MetaCampaignsService {
       const adsets = camp.adsets?.data ?? [];
       for (const adset of adsets) {
         for (const ad of adset.ads?.data ?? []) {
-          const formId       = ad.creative?.lead_gen_form?.id ?? null;
+          const formId       = ad.creative?.object_story_spec?.link_data?.call_to_action?.value?.lead_gen_form_id ?? null;
           const formConfigId = formId ? (formConfigByFormId.get(formId) ?? null) : null;
           const status       = this.parseStatus(camp.status);
           const existing     = existingByAdId.get(ad.id);
@@ -190,7 +190,7 @@ export class MetaCampaignsService {
     for (const c of campaigns)
       for (const as of c.adsets?.data ?? [])
         for (const ad of as.ads?.data ?? []) {
-          const fid = ad.creative?.lead_gen_form?.id;
+          const fid = ad.creative?.object_story_spec?.link_data?.call_to_action?.value?.lead_gen_form_id;
           if (fid) ids.push(fid);
         }
     return [...new Set(ids)];
