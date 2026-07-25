@@ -186,8 +186,11 @@ export class GraphApiService {
   // ─── Helper: flattenFields ────────────────────────────────────────────
 
   flattenFields(fieldData: GraphLeadField[]): Record<string, string> {
+    // Normaliza a minúsculas — Meta no es consistente: algunos forms
+    // devuelven "full_name"/"email", otros (ej. leads de prueba) devuelven
+    // "FULL_NAME"/"EMAIL" para el mismo campo estándar.
     return (fieldData ?? []).reduce((acc, f) => {
-      acc[f.name] = f.values?.[0] ?? '';
+      acc[f.name.toLowerCase()] = f.values?.[0] ?? '';
       return acc;
     }, {} as Record<string, string>);
   }
