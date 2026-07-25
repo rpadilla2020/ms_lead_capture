@@ -114,21 +114,34 @@ export class LeadProcessorService {
 
     const pageConfig = formConfig.page_config;
 
-    // Insertar lead con manejo de duplicado atómico
-    try {
-      lead = await this.leadRepo.save(
-        this.leadRepo.create({
-          leadgen_id: leadgenId, page_id: pageId, form_id: formId,
-          account_id: formConfig.account_id, form_config_id: formConfig.id,
-          status: MetaLeadStatus.PENDING,
-        }),
-      );
-    } catch (err) {
-      if (err.code === 'ER_DUP_ENTRY') {
-        this.logger.warn(`[LeadProcessor] ${leadgenId} ya existe (ER_DUP_ENTRY) — ignorando`);
-        return this.leadRepo.findOne({ where: { leadgen_id: leadgenId } });
+    // Si ya existe (reintento, o entrega duplicada del webhook) reusar la
+    // fila en vez de tratarla siempre como "ignorar" — solo se descarta si
+    // ya quedó PROCESSED (evita duplicar oportunidades); si quedó
+    // FAILED/PENDING/SKIPPED sí se reprocesa.
+    const existingLead = await this.leadRepo.findOne({ where: { leadgen_id: leadgenId } });
+    if (existingLead) {
+      if (existingLead.status === MetaLeadStatus.PROCESSED) {
+        this.logger.warn(`[LeadProcessor] ${leadgenId} ya fue procesado — ignorando duplicado`);
+        return existingLead;
       }
-      throw err;
+      lead = existingLead;
+    } else {
+      try {
+        lead = await this.leadRepo.save(
+          this.leadRepo.create({
+            leadgen_id: leadgenId, page_id: pageId, form_id: formId,
+            account_id: formConfig.account_id, form_config_id: formConfig.id,
+            status: MetaLeadStatus.PENDING,
+          }),
+        );
+      } catch (err) {
+        if (err.code === 'ER_DUP_ENTRY') {
+          // Carrera con otro proceso concurrente insertando el mismo leadgen_id
+          lead = await this.leadRepo.findOne({ where: { leadgen_id: leadgenId } });
+        } else {
+          throw err;
+        }
+      }
     }
 
     // FIX #8 — contador con log explícito en lugar de .catch(() => {})
@@ -230,20 +243,25 @@ export class LeadProcessorService {
           .filter(Boolean).join(' ')
       ?? `Lead Meta Ads ${new Date().toISOString()}`;
 
+    // Nombres de campo alineados con CreateLeadDto real de ms_opportunities
+    // (origin/origin_ref_id/client_snapshot/external_metadata no existen ahí
+    // — con whitelist:true se descartaban en silencio; created_by es
+    // obligatorio y faltaba, así que cada request fallaba con 400).
     const payload = {
       title,
-      pipeline_id:       formConfig.target_pipeline_id,
-      stage_id:          formConfig.target_stage_id,
-      assigned_user_id:  formConfig.default_agent_id ?? undefined,
-      origin:            'meta_ads',
-      origin_ref_id:     graphData.id,
-      external_metadata: {
+      pipeline_id:      formConfig.target_pipeline_id,
+      stage_id:         formConfig.target_stage_id,
+      assigned_user_id: formConfig.default_agent_id ?? undefined,
+      source:           'meta_ads',
+      source_ref_id:    graphData.id,
+      created_by:       'system',
+      metadata: {
         page_id:       formConfig.page_id,  form_id:       formConfig.form_id,
         ad_id:         graphData.ad_id,     ad_name:       graphData.ad_name,
         campaign_id:   graphData.campaign_id, campaign_name: graphData.campaign_name,
         adset_id:      graphData.adset_id,  adset_name:    graphData.adset_name,
       },
-      client_snapshot: {
+      contact_snapshot: {
         name:  title,
         email: rawFields.email        ?? mapped.email ?? null,
         phone: rawFields.phone_number ?? rawFields.phone ?? mapped.phone ?? null,
@@ -258,7 +276,9 @@ export class LeadProcessorService {
           `${this.oppUrl}/leads`,
           payload,
           {
-            headers: { 'x-account-id': String(formConfig.account_id), 'Content-Type': 'application/json' },
+            // AccountHeaderGuard de ms_opportunities exige el header "account"
+            // a secas, no "x-account-id"
+            headers: { account: String(formConfig.account_id), 'Content-Type': 'application/json' },
             timeout: OPP_TIMEOUT_MS,
           },
         ),
