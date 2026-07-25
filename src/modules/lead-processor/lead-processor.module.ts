@@ -6,6 +6,7 @@ import { MetaFormConfig }    from '../../entities/meta-form-config.entity';
 import { MetaPageConfig }    from '../../entities/meta-page-config.entity';
 import { MetaWebhookLog }    from '../../entities/meta-webhook-log.entity';
 import { GraphApiModule }    from '../graph-api/graph-api.module';
+import { UsersClientModule } from '../users-client/users-client.module';
 import { LeadProcessorService } from './lead-processor.service';
 
 @Module({
@@ -13,6 +14,7 @@ import { LeadProcessorService } from './lead-processor.service';
     TypeOrmModule.forFeature([MetaLead, MetaFormConfig, MetaPageConfig, MetaWebhookLog]),
     HttpModule,
     GraphApiModule,
+    UsersClientModule,
   ],
   providers: [LeadProcessorService],
   exports:   [LeadProcessorService],

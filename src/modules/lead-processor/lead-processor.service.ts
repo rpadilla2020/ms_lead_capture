@@ -8,6 +8,7 @@ import { MetaFormConfig }  from '../../entities/meta-form-config.entity';
 import { MetaPageConfig }  from '../../entities/meta-page-config.entity';
 import { MetaWebhookLog, WebhookLogStatus } from '../../entities/meta-webhook-log.entity';
 import { GraphApiService } from '../graph-api/graph-api.service';
+import { UsersClientService } from '../users-client/users-client.service';
 
 /** Máximo de leads procesados en paralelo por batch de webhook */
 const WEBHOOK_CONCURRENCY = Number(process.env.WEBHOOK_CONCURRENCY ?? 5);
@@ -31,6 +32,7 @@ export class LeadProcessorService {
     private readonly logRepo: Repository<MetaWebhookLog>,
     private readonly graphApi: GraphApiService,
     private readonly http: HttpService,
+    private readonly usersClient: UsersClientService,
   ) {}
 
   // ─── Procesar evento webhook con concurrencia limitada ───────────────
@@ -160,8 +162,13 @@ export class LeadProcessorService {
         ad_name:       graphData.ad_name       ?? null,
       });
 
-      const mapped        = this.applyMapping(fields, formConfig.field_mapping ?? {});
-      const opportunityId = await this.createOpportunity(formConfig, mapped, graphData, fields);
+      const mapped = this.applyMapping(fields, formConfig.field_mapping ?? {});
+      const client = await this.usersClient.resolveOrCreateClient(formConfig.account_id, {
+        ...this.extractName(fields),
+        email: fields.email        ?? mapped.email ?? null,
+        phone: fields.phone_number ?? fields.phone  ?? mapped.phone ?? null,
+      });
+      const opportunityId = await this.createOpportunity(formConfig, mapped, graphData, fields, client);
 
       await this.leadRepo.update(lead.id, {
         status:         MetaLeadStatus.PROCESSED,
@@ -232,11 +239,23 @@ export class LeadProcessorService {
     return result;
   }
 
+  /** "Juan Carlos Pérez" → { firstName: "Juan", lastName: "Carlos Pérez" } */
+  private extractName(fields: Record<string, string>): { firstName?: string; lastName?: string } {
+    if (fields.first_name || fields.last_name) {
+      return { firstName: fields.first_name || undefined, lastName: fields.last_name || undefined };
+    }
+    const full = fields.full_name?.trim();
+    if (!full) return {};
+    const [firstName, ...rest] = full.split(/\s+/);
+    return { firstName, lastName: rest.join(' ') || undefined };
+  }
+
   private async createOpportunity(
     formConfig: MetaFormConfig,
     mapped: Record<string, string>,
     graphData: any,
     rawFields: Record<string, string>,
+    client: { id: string; snapshot: Record<string, any> },
   ): Promise<string> {
     const title = mapped.title
       ?? [rawFields.full_name, rawFields.first_name, rawFields.last_name]
@@ -247,6 +266,8 @@ export class LeadProcessorService {
     // (origin/origin_ref_id/client_snapshot/external_metadata no existen ahí
     // — con whitelist:true se descartaban en silencio; created_by es
     // obligatorio y faltaba, así que cada request fallaba con 400).
+    // contact_snapshot es el JSON real del cliente en ms_users_, no uno
+    // armado a mano — por eso pasa por UsersClientService antes.
     const payload = {
       title,
       pipeline_id:      formConfig.target_pipeline_id,
@@ -261,11 +282,8 @@ export class LeadProcessorService {
         campaign_id:   graphData.campaign_id, campaign_name: graphData.campaign_name,
         adset_id:      graphData.adset_id,  adset_name:    graphData.adset_name,
       },
-      contact_snapshot: {
-        name:  title,
-        email: rawFields.email        ?? mapped.email ?? null,
-        phone: rawFields.phone_number ?? rawFields.phone ?? mapped.phone ?? null,
-      },
+      contact_id:       client.id,
+      contact_snapshot: client.snapshot,
       description: Object.entries(rawFields).map(([k, v]) => `${k}: ${v}`).join('\n'),
     };
 
