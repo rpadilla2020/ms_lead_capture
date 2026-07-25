@@ -7,12 +7,14 @@ import { MetaPagesController }      from './meta-pages.controller';
 import { FacebookOAuthService }     from './facebook-oauth.service';
 import { FacebookOAuthController }  from './facebook-oauth.controller';
 import { GraphApiModule }           from '../graph-api/graph-api.module';
+import { MetaAdAccountsModule }     from '../meta-ad-accounts/meta-ad-accounts.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([MetaPageConfig]),
     HttpModule,
     GraphApiModule,
+    MetaAdAccountsModule,
   ],
   providers:   [MetaPagesService, FacebookOAuthService],
   controllers: [MetaPagesController, FacebookOAuthController],

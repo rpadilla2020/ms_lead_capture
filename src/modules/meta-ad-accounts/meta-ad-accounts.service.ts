@@ -3,7 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { MetaAdAccount } from '../../entities/meta-ad-account.entity';
 import { MetaPageConfig } from '../../entities/meta-page-config.entity';
-import { GraphApiService } from '../graph-api/graph-api.service';
+import { GraphApiService, GraphAdAccount } from '../graph-api/graph-api.service';
 
 @Injectable()
 export class MetaAdAccountsService {
@@ -17,8 +17,11 @@ export class MetaAdAccountsService {
     private readonly graphApi: GraphApiService,
   ) {}
 
+  /** @deprecated `/{page-id}/adaccounts` no existe en Graph API — las cuentas
+   * publicitarias ahora se traen en el login (ver FacebookOAuthService), que
+   * sí tiene el user token necesario para `/me/adaccounts`. Este endpoint
+   * manual queda inutilizable con solo el page_token. */
   async syncFromGraphApi(pageConfigId: string, accountId: number): Promise<MetaAdAccount[]> {
-    // FIX #1 — cargar page_token explícitamente (select:false en entidad)
     const page = await this.pageRepo
       .createQueryBuilder('p')
       .addSelect('p.page_token')
@@ -32,6 +35,13 @@ export class MetaAdAccountsService {
       return [];
     }
 
+    return this.upsertMany(accountId, pageConfigId, adAccounts);
+  }
+
+  /** Upsert compartido — usado por syncFromGraphApi y por el login de OAuth. */
+  async upsertMany(
+    accountId: number, pageConfigId: string, adAccounts: GraphAdAccount[],
+  ): Promise<MetaAdAccount[]> {
     const saved: MetaAdAccount[] = [];
     for (const aa of adAccounts) {
       let entity = await this.repo.findOne({
@@ -40,6 +50,7 @@ export class MetaAdAccountsService {
 
       if (entity) {
         await this.repo.update(entity.id, {
+          page_config_id:  pageConfigId,
           ad_account_name: aa.name,
           synced_at:       new Date(),
           is_active:       aa.account_status === 1,

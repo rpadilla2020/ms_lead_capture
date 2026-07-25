@@ -71,6 +71,20 @@ export class GraphApiService {
 
   // ─── Ad Accounts ─────────────────────────────────────────────────────
 
+  /**
+   * `/{page-id}/adaccounts` no es un edge válido de Graph API — las páginas no
+   * "poseen" cuentas publicitarias, pertenecen al usuario (o a un Business
+   * Manager). Por eso esto usa `/me/adaccounts` con el user token, no el
+   * page token.
+   */
+  async getUserAdAccounts(userToken: string): Promise<GraphAdAccount[]> {
+    return this.paginateAll<GraphAdAccount>(
+      `${this.base}/me/adaccounts`,
+      { fields: 'id,name,account_status', access_token: userToken },
+    );
+  }
+
+  /** @deprecated `/{page-id}/adaccounts` no existe en Graph API — usar getUserAdAccounts */
   async getPageAdAccounts(pageId: string, pageToken: string): Promise<GraphAdAccount[]> {
     return this.paginateAll<GraphAdAccount>(
       `${this.base}/${pageId}/adaccounts`,

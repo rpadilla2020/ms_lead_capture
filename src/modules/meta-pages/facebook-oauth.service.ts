@@ -6,7 +6,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { firstValueFrom } from 'rxjs';
 import { MetaPageConfig } from '../../entities/meta-page-config.entity';
-import { GraphApiService } from '../graph-api/graph-api.service';
+import { GraphApiService, GraphAdAccount } from '../graph-api/graph-api.service';
+import { MetaAdAccountsService } from '../meta-ad-accounts/meta-ad-accounts.service';
 
 const GRAPH_TIMEOUT = Number(process.env.GRAPH_TIMEOUT_MS ?? 8_000);
 
@@ -32,6 +33,7 @@ export class FacebookOAuthService {
     private readonly repo: Repository<MetaPageConfig>,
     private readonly graphApi: GraphApiService,
     private readonly http: HttpService,
+    private readonly adAccountsService: MetaAdAccountsService,
   ) {}
 
   // ── 1. Generar URL de autorización de Facebook ─────────────────────────
@@ -77,12 +79,23 @@ export class FacebookOAuthService {
       return { created: 0, updated: 0, skipped: 0, pages: [] };
     }
 
+    // Paso 3b: cuentas publicitarias del usuario — solo se pueden traer acá,
+    // mientras tenemos el user token fresco en memoria (no se persiste).
+    // No bloquea el login si falla.
+    let adAccounts: GraphAdAccount[] = [];
+    try {
+      adAccounts = await this.graphApi.getUserAdAccounts(longToken);
+      this.logger.log(`[OAuth] ${adAccounts.length} cuenta(s) publicitaria(s) del usuario`);
+    } catch (err) {
+      this.logger.warn(`[OAuth] No se pudieron traer ad accounts: ${err.message}`);
+    }
+
     // Paso 4: guardar cada página con su propio page token
     const result: OAuthPageResult = { created: 0, updated: 0, skipped: 0, pages: [] };
 
     for (const fbPage of pages) {
       try {
-        await this.upsertPage(accountId, fbPage, result);
+        await this.upsertPage(accountId, fbPage, result, adAccounts);
       } catch (err) {
         this.logger.error(`[OAuth] Error guardando página ${fbPage.id}: ${err.message}`);
         result.skipped++;
@@ -181,6 +194,7 @@ export class FacebookOAuthService {
     accountId: number,
     fbPage: { id: string; name: string; access_token: string; category?: string },
     result: OAuthPageResult,
+    adAccounts: GraphAdAccount[] = [],
   ): Promise<void> {
     // Verificar token y obtener expiración
     const debug = await this.graphApi.debugToken(fbPage.access_token);
@@ -204,17 +218,20 @@ export class FacebookOAuthService {
     };
 
     const isNew = !existing;
+    let pageConfigId: string;
 
     if (existing) {
       await this.repo.update(existing.id, data);
+      pageConfigId = existing.id;
     } else {
-      await this.repo.save(
+      const saved = await this.repo.save(
         this.repo.create({
           account_id: accountId,
           page_id:    fbPage.id,
           ...data,
         }),
       );
+      pageConfigId = saved.id;
     }
 
     result.pages.push({ page_id: fbPage.id, page_name: fbPage.name, is_new: isNew });
@@ -223,5 +240,10 @@ export class FacebookOAuthService {
     this.logger.log(
       `[OAuth] Página ${isNew ? 'creada' : 'actualizada'}: ${fbPage.id} (${fbPage.name})`,
     );
+
+    if (adAccounts.length) {
+      await this.adAccountsService.upsertMany(accountId, pageConfigId, adAccounts)
+        .catch((err) => this.logger.warn(`[OAuth] Error guardando ad accounts para ${fbPage.id}: ${err.message}`));
+    }
   }
 }
