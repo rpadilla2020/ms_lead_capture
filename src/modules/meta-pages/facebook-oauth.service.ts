@@ -47,7 +47,7 @@ export class FacebookOAuthService {
     const params = new URLSearchParams({
       client_id:     this.appId,
       redirect_uri:  this.redirectUri,
-      scope:         'pages_show_list,pages_read_engagement,leads_retrieval,pages_messaging,ads_read,pages_manage_ads',
+      scope:         'pages_show_list,pages_read_engagement,leads_retrieval,pages_messaging,ads_read,pages_manage_ads,pages_manage_metadata',
       state:         String(accountId),
       response_type: 'code',
     });
