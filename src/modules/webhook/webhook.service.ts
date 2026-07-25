@@ -1,5 +1,5 @@
 import {
-  BadRequestException, Injectable, Logger, UnauthorizedException,
+  BadRequestException, ForbiddenException, Injectable, Logger, UnauthorizedException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -10,8 +10,9 @@ import { LeadProcessorService } from '../lead-processor/lead-processor.service';
 @Injectable()
 export class WebhookService {
   private readonly logger      = new Logger(WebhookService.name);
-  private readonly verifyToken = process.env.META_VERIFY_TOKEN ?? 'cereza_meta_verify';
-  private readonly appSecret   = process.env.META_APP_SECRET   ?? '';
+  private readonly verifyToken     = process.env.META_VERIFY_TOKEN ?? 'cereza_meta_verify';
+  private readonly appSecret       = process.env.META_APP_SECRET   ?? '';
+  private readonly forwardSecret   = process.env.SOCIALCC_FORWARD_SECRET ?? '';
 
   constructor(
     private readonly processor: LeadProcessorService,
@@ -79,6 +80,43 @@ export class WebhookService {
         entries.map((e) => this.processor.processWebhookEvent(e, remoteIp)),
       ).catch((err) =>
         this.logger.error(`[Webhook] Error procesando entries: ${err.message}`),
+      );
+    });
+
+    return { received: true };
+  }
+
+  // ── POST /webhook/meta/internal ── reenviado desde ms_social-contact-center ──
+  //
+  // ms_socialcc recibe TODOS los webhooks de "page" de la app compartida de
+  // Meta (una sola callback_url por app/objeto) y nos reenvía acá los
+  // eventos con field=leadgen. No trae la firma HMAC original de Meta (no
+  // aplica, no es Meta quien nos llama), así que se autentica con un
+  // secreto compartido en vez de la firma.
+
+  async handleInternalEvent(
+    internalSecret: string,
+    payload: any,
+    remoteIp?: string,
+  ): Promise<{ received: boolean }> {
+    if (!this.forwardSecret || internalSecret !== this.forwardSecret) {
+      this.logger.warn('[Webhook] Internal — secreto inválido o no configurado');
+      throw new ForbiddenException('Secreto interno inválido');
+    }
+
+    if (payload?.object !== 'page') {
+      this.logger.warn(`[Webhook] Internal — objeto inesperado: ${payload?.object}`);
+      return { received: true };
+    }
+
+    const entries: any[] = payload?.entry ?? [];
+    this.logger.log(`[Webhook] Internal — recibidos ${entries.length} entry(s) de ms_socialcc`);
+
+    setImmediate(() => {
+      Promise.all(
+        entries.map((e) => this.processor.processWebhookEvent(e, remoteIp)),
+      ).catch((err) =>
+        this.logger.error(`[Webhook] Internal — error procesando entries: ${err.message}`),
       );
     });
 

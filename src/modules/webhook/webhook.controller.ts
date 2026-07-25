@@ -25,4 +25,16 @@ export class WebhookController {
     const remoteIp = req.ip ?? req.headers?.['x-forwarded-for'] ?? null;
     return this.service.handleEvent(rawBody, signature, body, remoteIp);
   }
+
+  /** Reenviado desde ms_social-contact-center — no viene de Meta directamente */
+  @Post('meta/internal')
+  @HttpCode(HttpStatus.OK)
+  async handleInternalEvent(
+    @Req() req: any,
+    @Headers('x-internal-secret') internalSecret: string,
+    @Body() body: any,
+  ) {
+    const remoteIp = req.ip ?? req.headers?.['x-forwarded-for'] ?? null;
+    return this.service.handleInternalEvent(internalSecret, body, remoteIp);
+  }
 }
