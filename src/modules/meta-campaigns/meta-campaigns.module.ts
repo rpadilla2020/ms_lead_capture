@@ -7,11 +7,13 @@ import { MetaFormConfig } from '../../entities/meta-form-config.entity';
 import { MetaCampaignsService }    from './meta-campaigns.service';
 import { MetaCampaignsController } from './meta-campaigns.controller';
 import { GraphApiModule } from '../graph-api/graph-api.module';
+import { UserTokenModule } from '../user-token/user-token.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([MetaCampaign, MetaAdAccount, MetaPageConfig, MetaFormConfig]),
     GraphApiModule,
+    UserTokenModule,
   ],
   providers:   [MetaCampaignsService],
   controllers: [MetaCampaignsController],

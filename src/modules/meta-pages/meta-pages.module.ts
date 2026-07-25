@@ -8,6 +8,7 @@ import { FacebookOAuthService }     from './facebook-oauth.service';
 import { FacebookOAuthController }  from './facebook-oauth.controller';
 import { GraphApiModule }           from '../graph-api/graph-api.module';
 import { MetaAdAccountsModule }     from '../meta-ad-accounts/meta-ad-accounts.module';
+import { UserTokenModule }          from '../user-token/user-token.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { MetaAdAccountsModule }     from '../meta-ad-accounts/meta-ad-accounts.m
     HttpModule,
     GraphApiModule,
     MetaAdAccountsModule,
+    UserTokenModule,
   ],
   providers:   [MetaPagesService, FacebookOAuthService],
   controllers: [MetaPagesController, FacebookOAuthController],

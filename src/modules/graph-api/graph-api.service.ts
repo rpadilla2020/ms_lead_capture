@@ -95,14 +95,14 @@ export class GraphApiService {
   // ─── Campañas — paginadas ─────────────────────────────────────────────
 
   async getAdAccountCampaignsPaginated(
-    adAccountId: string, pageToken: string,
+    adAccountId: string, accessToken: string,
   ): Promise<GraphCampaign[]> {
     // FIX #9 — paginación real con cursores
     return this.paginateAll<GraphCampaign>(
       `${this.base}/${adAccountId}/campaigns`,
       {
         fields: 'id,name,status,adsets{id,name,status,ads{id,name,status,creative{lead_gen_form{id,name}}}}',
-        access_token: pageToken,
+        access_token: accessToken,
       },
     );
   }

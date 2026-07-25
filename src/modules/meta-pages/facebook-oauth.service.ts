@@ -8,6 +8,7 @@ import { firstValueFrom } from 'rxjs';
 import { MetaPageConfig } from '../../entities/meta-page-config.entity';
 import { GraphApiService, GraphAdAccount } from '../graph-api/graph-api.service';
 import { MetaAdAccountsService } from '../meta-ad-accounts/meta-ad-accounts.service';
+import { UserTokenService } from '../user-token/user-token.service';
 
 const GRAPH_TIMEOUT = Number(process.env.GRAPH_TIMEOUT_MS ?? 8_000);
 
@@ -34,6 +35,7 @@ export class FacebookOAuthService {
     private readonly graphApi: GraphApiService,
     private readonly http: HttpService,
     private readonly adAccountsService: MetaAdAccountsService,
+    private readonly userTokenService: UserTokenService,
   ) {}
 
   // ── 1. Generar URL de autorización de Facebook ─────────────────────────
@@ -69,7 +71,12 @@ export class FacebookOAuthService {
     const shortToken = await this.exchangeCodeForToken(code);
 
     // Paso 2: short-lived → long-lived user token (60 días)
-    const longToken = await this.exchangeForLongLivedToken(shortToken);
+    const { token: longToken, expiresAt } = await this.exchangeForLongLivedToken(shortToken);
+
+    // Se persiste para poder sincronizar campañas después sin re-login
+    // (los edges adaccounts/campaigns de Graph API exigen el user token).
+    await this.userTokenService.upsert(accountId, longToken, expiresAt)
+      .catch((err) => this.logger.warn(`[OAuth] Error guardando user token: ${err.message}`));
 
     // Paso 3: obtener páginas autorizadas por el usuario
     const pages = await this.getAuthorizedPages(longToken);
@@ -138,7 +145,9 @@ export class FacebookOAuthService {
   }
 
   /** Convierte short-lived en long-lived user token (~60 días) */
-  private async exchangeForLongLivedToken(shortToken: string): Promise<string> {
+  private async exchangeForLongLivedToken(
+    shortToken: string,
+  ): Promise<{ token: string; expiresAt: Date | null }> {
     try {
       const resp = await firstValueFrom(
         this.http.get<{ access_token: string; expires_in: number }>(
@@ -156,7 +165,10 @@ export class FacebookOAuthService {
       );
       if (!resp.data?.access_token) throw new Error('No se recibió long-lived token');
       this.logger.log('[OAuth] Long-lived user token obtenido');
-      return resp.data.access_token;
+      const expiresAt = resp.data.expires_in
+        ? new Date(Date.now() + resp.data.expires_in * 1000)
+        : null;
+      return { token: resp.data.access_token, expiresAt };
     } catch (err) {
       const msg = err?.response?.data?.error?.message ?? err.message;
       throw new BadRequestException(`Error obteniendo long-lived token: ${msg}`);

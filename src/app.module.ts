@@ -9,6 +9,7 @@ import { MetaLead }          from './entities/meta-lead.entity';
 import { MetaAdAccount }     from './entities/meta-ad-account.entity';
 import { MetaCampaign }      from './entities/meta-campaign.entity';
 import { MetaWebhookLog }    from './entities/meta-webhook-log.entity';
+import { MetaUserToken }     from './entities/meta-user-token.entity';
 
 import { GraphApiModule }         from './modules/graph-api/graph-api.module';
 import { LeadProcessorModule }    from './modules/lead-processor/lead-processor.module';
@@ -19,6 +20,7 @@ import { WebhookModule }          from './modules/webhook/webhook.module';
 import { MetaAdAccountsModule }   from './modules/meta-ad-accounts/meta-ad-accounts.module';
 import { MetaCampaignsModule }    from './modules/meta-campaigns/meta-campaigns.module';
 import { TokenMonitorModule }     from './modules/token-monitor/token-monitor.module';
+import { UserTokenModule }        from './modules/user-token/user-token.module';
 
 @Module({
   imports: [
@@ -39,6 +41,7 @@ import { TokenMonitorModule }     from './modules/token-monitor/token-monitor.mo
         MetaAdAccount,
         MetaCampaign,
         MetaWebhookLog,
+        MetaUserToken,
       ],
       synchronize: process.env.NODE_ENV !== 'production',
       charset:     'utf8mb4',
@@ -54,6 +57,7 @@ import { TokenMonitorModule }     from './modules/token-monitor/token-monitor.mo
     MetaAdAccountsModule,
     MetaCampaignsModule,
     TokenMonitorModule,
+    UserTokenModule,
   ],
 })
 export class AppModule {}

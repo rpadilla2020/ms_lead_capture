@@ -1,10 +1,11 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { MetaCampaign, MetaCampaignStatus } from '../../entities/meta-campaign.entity';
 import { MetaAdAccount }  from '../../entities/meta-ad-account.entity';
 import { MetaFormConfig } from '../../entities/meta-form-config.entity';
 import { GraphApiService, GraphCampaign } from '../graph-api/graph-api.service';
+import { UserTokenService } from '../user-token/user-token.service';
 
 @Injectable()
 export class MetaCampaignsService {
@@ -18,16 +19,15 @@ export class MetaCampaignsService {
     @InjectRepository(MetaFormConfig)
     private readonly formRepo: Repository<MetaFormConfig>,
     private readonly graphApi: GraphApiService,
+    private readonly userTokenService: UserTokenService,
   ) {}
 
   // ── Sync campañas ─────────────────────────────────────────────────────
 
   async syncFromAdAccount(adAccountEntityId: string, accountId: number): Promise<MetaCampaign[]> {
-    // FIX #1 — cargar page_token explícitamente (select:false en entidad)
     const adAccount = await this.adAccountRepo
       .createQueryBuilder('aa')
       .leftJoinAndSelect('aa.page_config', 'pc')
-      .addSelect('pc.page_token')
       .where('aa.id = :id AND aa.account_id = :accountId', { id: adAccountEntityId, accountId })
       .getOne();
     if (!adAccount) throw new NotFoundException('Ad Account no encontrado');
@@ -35,12 +35,20 @@ export class MetaCampaignsService {
     // FIX #13 — verificar relación cargada
     if (!adAccount.page_config) throw new Error('page_config no disponible en ad_account');
 
-    const pageToken = adAccount.page_config.page_token;
-    const pageId    = adAccount.page_config.page_id;
+    // El edge /{ad_account}/campaigns exige el user token — el page_token no
+    // tiene permisos de anuncios (ver [[project_lead_capture_meta_ads]]).
+    const userToken = await this.userTokenService.getToken(accountId);
+    if (!userToken) {
+      throw new BadRequestException(
+        'No hay un token de usuario guardado — vuelve a conectar la página vía login para poder sincronizar campañas',
+      );
+    }
+
+    const pageId = adAccount.page_config.page_id;
 
     // FIX #9 — obtener todas las páginas con paginación de cursores
     const campaigns = await this.graphApi.getAdAccountCampaignsPaginated(
-      adAccount.ad_account_id, pageToken,
+      adAccount.ad_account_id, userToken,
     );
 
     // FIX #2 — precargar todos los ad_ids y form_ids existentes en memoria
